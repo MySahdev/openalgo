@@ -486,6 +486,31 @@ def react_historify():
 
 
 # ============================================================
+# Backtest Routes - Strategy Backtesting
+# ============================================================
+
+
+@react_bp.route("/backtest", strict_slashes=False)
+def react_backtest_index():
+    return serve_react_app()
+
+
+@react_bp.route("/backtest/new", strict_slashes=False)
+def react_backtest_new():
+    return serve_react_app()
+
+
+@react_bp.route("/backtest/compare", strict_slashes=False)
+def react_backtest_compare():
+    return serve_react_app()
+
+
+@react_bp.route("/backtest/<backtest_id>", strict_slashes=False)
+def react_backtest_results(backtest_id):
+    return serve_react_app()
+
+
+# ============================================================
 # Flow Routes - Visual Workflow Automation
 # ============================================================
 

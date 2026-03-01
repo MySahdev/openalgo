@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   CheckCircle,
+  Download,
+  Loader2,
   Play,
   XCircle,
 } from 'lucide-react'
@@ -8,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { backtestApi } from '@/api/backtest'
+import { historifyApi } from '@/api/historify'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -27,6 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { PythonEditor } from '@/components/ui/python-editor'
+import { SymbolSearch } from '@/components/ui/symbol-search'
 import type { BacktestProgress } from '@/types/backtest'
 import { EXCHANGE_OPTIONS, INTERVAL_OPTIONS } from '@/types/backtest'
 import { showToast } from '@/utils/toast'
@@ -37,28 +41,24 @@ const DEFAULT_STRATEGY = `from openalgo import api
 client = api(api_key="your_api_key", host="http://127.0.0.1:5000")
 
 # Strategy parameters
-symbol = "SBIN"
+symbol = "NIFTY"
 exchange = "NSE"
 
 while True:
     # Get historical data
     df = client.history(symbol=symbol, exchange=exchange, interval="D")
 
-    if len(df) < 20:
+    if len(df) < 15:
         import time
         time.sleep(5)
         continue
 
-    # Calculate 10-period and 20-period EMAs
-    df["ema_10"] = df["close"].ewm(span=10).mean()
-    df["ema_20"] = df["close"].ewm(span=20).mean()
+    # Calculate 9-period and 15-period EMAs
+    df["ema_9"] = df["close"].ewm(span=9).mean()
+    df["ema_15"] = df["close"].ewm(span=15).mean()
 
-    # Get current position
-    pos = client.openposition(strategy="ema_crossover", symbol=symbol, exchange=exchange)
-    current_qty = int(pos.get("quantity", "0"))
-
-    # EMA crossover logic
-    if df["ema_10"].iloc[-1] > df["ema_20"].iloc[-1] and df["ema_10"].iloc[-2] <= df["ema_20"].iloc[-2]:
+    # EMA crossover logic — trades both long and short
+    if df["ema_9"].iloc[-1] > df["ema_15"].iloc[-1] and df["ema_9"].iloc[-2] <= df["ema_15"].iloc[-2]:
         # Bullish crossover — go long
         client.placesmartorder(
             strategy="ema_crossover",
@@ -71,8 +71,8 @@ while True:
             position_size=1,
         )
 
-    elif df["ema_10"].iloc[-1] < df["ema_20"].iloc[-1] and df["ema_10"].iloc[-2] >= df["ema_20"].iloc[-2]:
-        # Bearish crossover — go short or close
+    elif df["ema_9"].iloc[-1] < df["ema_15"].iloc[-1] and df["ema_9"].iloc[-2] >= df["ema_15"].iloc[-2]:
+        # Bearish crossover — go short
         client.placesmartorder(
             strategy="ema_crossover",
             symbol=symbol,
@@ -81,7 +81,7 @@ while True:
             price_type="MARKET",
             product="MIS",
             quantity=1,
-            position_size=0,
+            position_size=-1,
         )
 
     import time
@@ -96,11 +96,16 @@ export default function NewBacktest() {
   // Form state
   const [name, setName] = useState('')
   const [strategyCode, setStrategyCode] = useState(DEFAULT_STRATEGY)
-  const [symbols, setSymbols] = useState('SBIN')
+  const [symbols, setSymbols] = useState('NIFTY')
   const [exchange, setExchange] = useState('NSE')
   const [interval, setInterval] = useState('D')
-  const [startDate, setStartDate] = useState('2024-01-01')
-  const [endDate, setEndDate] = useState('2024-12-31')
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [endDate, setEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0]
+  })
   const [initialCapital, setInitialCapital] = useState('100000')
   const [slippagePct, setSlippagePct] = useState('0.05')
   const [commissionPerOrder, setCommissionPerOrder] = useState('20')
@@ -114,14 +119,38 @@ export default function NewBacktest() {
     checked: boolean
     available: boolean
     message: string
-  }>({ checked: false, available: false, message: '' })
+    unavailableSymbols: string[]
+  }>({ checked: false, available: false, message: '', unavailableSymbols: [] })
+  const [isFetching, setIsFetching] = useState(false)
+  const [fetchProgress, setFetchProgress] = useState('')
 
   // Load strategy code from URL params (e.g., from python strategy page)
+  // Or load full config from a previous backtest (rerun)
   useEffect(() => {
     const code = searchParams.get('code')
     const stratName = searchParams.get('name')
-    if (code) setStrategyCode(decodeURIComponent(code))
-    if (stratName) setName(decodeURIComponent(stratName))
+    const rerunId = searchParams.get('rerun')
+
+    if (rerunId) {
+      // Load config from previous backtest for rerun
+      backtestApi.getConfig(rerunId).then((data) => {
+        setName(`${data.name} (rerun)`)
+        setStrategyCode(data.strategy_code)
+        setSymbols(data.config.symbols.join(', '))
+        setExchange(data.config.exchange || 'NSE')
+        setInterval(data.config.interval)
+        setStartDate(data.config.start_date)
+        setEndDate(data.config.end_date)
+        setInitialCapital(String(data.config.initial_capital))
+        setSlippagePct(String(data.config.slippage_pct))
+        setCommissionPerOrder(String(data.config.commission_per_order))
+      }).catch(() => {
+        showToast.error('Failed to load backtest config for rerun')
+      })
+    } else {
+      if (code) setStrategyCode(decodeURIComponent(code))
+      if (stratName) setName(decodeURIComponent(stratName))
+    }
   }, [searchParams])
 
   // Cleanup SSE on unmount
@@ -136,7 +165,7 @@ export default function NewBacktest() {
   const checkDataAvailability = useCallback(async () => {
     const symbolList = symbols.split(',').map((s) => s.trim()).filter(Boolean)
     if (symbolList.length === 0) {
-      setDataCheck({ checked: true, available: false, message: 'No symbols specified' })
+      setDataCheck({ checked: true, available: false, message: 'No symbols specified', unavailableSymbols: [] })
       return
     }
 
@@ -158,12 +187,14 @@ export default function NewBacktest() {
           checked: true,
           available: true,
           message: `Data available for all ${symbolList.length} symbol(s)`,
+          unavailableSymbols: [],
         })
       } else {
         setDataCheck({
           checked: true,
           available: false,
-          message: `No data for: ${unavailable.join(', ')}. Please fetch data in Historify first.`,
+          message: `No data for: ${unavailable.join(', ')}`,
+          unavailableSymbols: unavailable,
         })
       }
     } catch {
@@ -171,9 +202,93 @@ export default function NewBacktest() {
         checked: true,
         available: false,
         message: 'Failed to check data availability',
+        unavailableSymbols: [],
       })
     }
   }, [symbols, exchange, interval, startDate, endDate])
+
+  // Map user-selected interval to Historify storage interval (only 1m and D are stored)
+  const getDownloadInterval = (iv: string) => {
+    if (iv === 'D') return 'D'
+    return '1m' // 5m, 15m, 30m, 1h all need 1m data
+  }
+
+  const handleFetchData = useCallback(async () => {
+    const missingSymbols = dataCheck.unavailableSymbols
+    if (missingSymbols.length === 0) return
+
+    setIsFetching(true)
+    setFetchProgress('Starting download...')
+
+    try {
+      const downloadInterval = getDownloadInterval(interval)
+      const result = await historifyApi.createJob({
+        symbols: missingSymbols.map((s) => ({ symbol: s, exchange })),
+        interval: downloadInterval,
+        start_date: startDate,
+        end_date: endDate,
+      })
+
+      if (result.status !== 'success') {
+        throw new Error(result.message || 'Failed to create download job')
+      }
+
+      const jobId = result.job_id
+      setFetchProgress(`Downloading ${result.total_symbols} symbol(s)...`)
+
+      // Poll job status
+      const poll = async () => {
+        const maxAttempts = 300 // 5 minutes at 1s intervals
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise((r) => setTimeout(r, 2000))
+          try {
+            const status = await historifyApi.getJobStatus(jobId)
+            setFetchProgress(
+              `Downloaded ${status.completed_symbols}/${status.total_symbols} symbol(s)${
+                status.failed_symbols > 0 ? ` (${status.failed_symbols} failed)` : ''
+              }`
+            )
+
+            if (
+              status.status === 'completed' ||
+              status.status === 'completed_with_errors' ||
+              status.status === 'failed' ||
+              status.status === 'cancelled'
+            ) {
+              return status
+            }
+          } catch {
+            // Ignore poll errors, keep trying
+          }
+        }
+        return null
+      }
+
+      const finalStatus = await poll()
+
+      if (finalStatus?.status === 'completed' && finalStatus.failed_symbols === 0) {
+        showToast.success('Data downloaded successfully')
+      } else if (finalStatus?.status === 'completed_with_errors') {
+        showToast.error(`${finalStatus.failed_symbols} symbol(s) failed to download`)
+      } else if (finalStatus?.status === 'failed') {
+        showToast.error('Download failed')
+      } else if (finalStatus?.status === 'cancelled') {
+        showToast.error('Download was cancelled')
+      } else if (!finalStatus) {
+        showToast.error('Download timed out')
+      }
+
+      // Auto-recheck data availability
+      setIsFetching(false)
+      setFetchProgress('')
+      await checkDataAvailability()
+    } catch (err: unknown) {
+      setIsFetching(false)
+      setFetchProgress('')
+      const message = err instanceof Error ? err.message : 'Failed to fetch data'
+      showToast.error(message)
+    }
+  }, [dataCheck.unavailableSymbols, exchange, interval, startDate, endDate, checkDataAvailability])
 
   const handleRun = async () => {
     if (!strategyCode.trim()) {
@@ -332,12 +447,13 @@ export default function NewBacktest() {
               </div>
 
               <div>
-                <Label htmlFor="symbols">Symbols (comma-separated)</Label>
-                <Input
-                  id="symbols"
+                <Label>Symbols</Label>
+                <SymbolSearch
                   value={symbols}
-                  onChange={(e) => setSymbols(e.target.value)}
-                  placeholder="SBIN, RELIANCE, TCS"
+                  onChange={setSymbols}
+                  exchange={exchange}
+                  placeholder="Search symbols to add..."
+                  disabled={isRunning}
                 />
               </div>
 
@@ -382,7 +498,12 @@ export default function NewBacktest() {
                     id="start_date"
                     type="date"
                     value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
+                    max={endDate}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setStartDate(val)
+                      if (val > endDate) setEndDate(val)
+                    }}
                   />
                 </div>
                 <div>
@@ -391,6 +512,7 @@ export default function NewBacktest() {
                     id="end_date"
                     type="date"
                     value={endDate}
+                    min={startDate}
                     onChange={(e) => setEndDate(e.target.value)}
                   />
                 </div>
@@ -435,20 +557,50 @@ export default function NewBacktest() {
                   variant="outline"
                   className="w-full"
                   onClick={checkDataAvailability}
-                  disabled={isRunning}
+                  disabled={isRunning || isFetching}
                 >
                   Check Data Availability
                 </Button>
                 {dataCheck.checked && (
-                  <div className="mt-2 flex items-start gap-2 text-sm">
-                    {dataCheck.available ? (
-                      <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                  <div className="mt-2 space-y-2">
+                    <div className="flex items-start gap-2 text-sm">
+                      {dataCheck.available ? (
+                        <CheckCircle className="h-4 w-4 text-green-500 mt-0.5 shrink-0" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                      )}
+                      <span className={dataCheck.available ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                        {dataCheck.message}
+                      </span>
+                    </div>
+                    {/* Fetch Missing Data button */}
+                    {!dataCheck.available && dataCheck.unavailableSymbols.length > 0 && (
+                      <div className="space-y-2">
+                        <Button
+                          variant="secondary"
+                          className="w-full"
+                          onClick={handleFetchData}
+                          disabled={isFetching || isRunning}
+                        >
+                          {isFetching ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Download className="h-4 w-4 mr-2" />
+                          )}
+                          {isFetching ? 'Fetching...' : `Fetch Data for ${dataCheck.unavailableSymbols.join(', ')}`}
+                        </Button>
+                        {isFetching && fetchProgress && (
+                          <p className="text-xs text-muted-foreground text-center">
+                            {fetchProgress}
+                          </p>
+                        )}
+                        {!isFetching && interval !== 'D' && interval !== '1m' && (
+                          <p className="text-xs text-muted-foreground">
+                            Will download 1-minute data (aggregated to {interval} during backtest)
+                          </p>
+                        )}
+                      </div>
                     )}
-                    <span className={dataCheck.available ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                      {dataCheck.message}
-                    </span>
                   </div>
                 )}
               </div>

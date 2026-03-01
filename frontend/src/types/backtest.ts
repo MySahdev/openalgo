@@ -88,9 +88,17 @@ export interface BacktestResult {
   equity_curve: EquityPoint[]
   monthly_returns: Record<string, number>
   trades: BacktestTrade[]
+  strategy_code?: string
   duration_ms: number | null
   created_at: string | null
   completed_at: string | null
+}
+
+export interface BacktestConfigResponse {
+  backtest_id: string
+  name: string
+  strategy_code: string
+  config: BacktestConfig & { exchange: string }
 }
 
 export interface BacktestRunRequest {

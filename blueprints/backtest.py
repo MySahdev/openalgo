@@ -320,6 +320,7 @@ def backtest_results(backtest_id):
                 "equity_curve": equity_curve,
                 "monthly_returns": monthly_returns,
                 "trades": trades_list,
+                "strategy_code": run.strategy_code,
                 "duration_ms": run.duration_ms,
                 "created_at": str(run.created_at) if run.created_at else None,
                 "completed_at": str(run.completed_at) if run.completed_at else None,
@@ -328,6 +329,49 @@ def backtest_results(backtest_id):
     except Exception as e:
         logger.error(f"Error fetching backtest results: {e}")
         traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# ─── Get Config (strategy code + params for rerun) ───────────────
+
+
+@backtest_bp.route("/api/config/<backtest_id>")
+@check_session_validity
+@limiter.limit(API_RATE_LIMIT)
+def backtest_config(backtest_id):
+    """Get strategy code and configuration for any backtest (for rerun)."""
+    try:
+        run = get_backtest_run(backtest_id)
+        if not run:
+            return jsonify({"status": "error", "message": "Backtest not found"}), 404
+
+        # Try to get exchange from first trade, fallback to "NSE"
+        exchange = "NSE"
+        first_trade = BacktestTrade.query.filter_by(backtest_id=backtest_id).first()
+        if first_trade:
+            exchange = first_trade.exchange
+
+        return jsonify({
+            "status": "success",
+            "data": {
+                "backtest_id": run.id,
+                "name": run.name,
+                "strategy_code": run.strategy_code,
+                "config": {
+                    "symbols": json.loads(run.symbols) if run.symbols else [],
+                    "exchange": exchange,
+                    "start_date": run.start_date,
+                    "end_date": run.end_date,
+                    "interval": run.interval,
+                    "initial_capital": float(run.initial_capital or 0),
+                    "slippage_pct": float(run.slippage_pct or 0),
+                    "commission_per_order": float(run.commission_per_order or 0),
+                    "commission_pct": float(run.commission_pct or 0),
+                },
+            },
+        })
+    except Exception as e:
+        logger.error(f"Error fetching backtest config: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 

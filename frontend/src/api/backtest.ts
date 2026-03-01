@@ -1,4 +1,5 @@
 import type {
+  BacktestConfigResponse,
   BacktestListItem,
   BacktestResult,
   BacktestRunRequest,
@@ -107,6 +108,16 @@ export const backtestApi = {
       { backtest_ids: backtestIds }
     )
     return response.data.data || []
+  },
+
+  /**
+   * Get strategy code and config for a backtest (for rerun)
+   */
+  getConfig: async (backtestId: string): Promise<BacktestConfigResponse> => {
+    const response = await webClient.get<ApiResponse<BacktestConfigResponse>>(
+      `/backtest/api/config/${backtestId}`
+    )
+    return response.data.data!
   },
 
   /**

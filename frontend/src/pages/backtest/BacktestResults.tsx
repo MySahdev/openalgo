@@ -4,6 +4,7 @@ import {
   Clock,
   Download,
   Loader2,
+  RotateCcw,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react'
@@ -325,9 +326,15 @@ export default function BacktestResults() {
           <CardContent className="py-8 text-center">
             <TrendingDown className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <p className="text-lg text-red-600 dark:text-red-400">{error}</p>
-            <Button className="mt-4" onClick={() => navigate('/backtest')}>
-              Back to Backtests
-            </Button>
+            <div className="flex gap-2 mt-4 justify-center">
+              <Button variant="outline" onClick={() => navigate('/backtest')}>
+                Back to Backtests
+              </Button>
+              <Button onClick={() => navigate(`/backtest/new?rerun=${backtestId}`)}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Rerun with Changes
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -355,6 +362,13 @@ export default function BacktestResults() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/backtest/new?rerun=${result.backtest_id}`)}
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Rerun
+          </Button>
           <a href={backtestApi.getExportUrl(result.backtest_id)}>
             <Button variant="outline">
               <Download className="h-4 w-4 mr-2" />

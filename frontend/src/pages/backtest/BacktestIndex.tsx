@@ -5,6 +5,7 @@ import {
   GitCompare,
   Plus,
   RefreshCw,
+  RotateCcw,
   Trash2,
   TrendingDown,
 } from 'lucide-react'
@@ -201,11 +202,7 @@ export default function BacktestIndex() {
                     key={bt.backtest_id}
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => {
-                      if (bt.status === 'completed') {
-                        navigate(`/backtest/${bt.backtest_id}`)
-                      } else if (bt.status === 'running') {
-                        navigate(`/backtest/${bt.backtest_id}`)
-                      }
+                      navigate(`/backtest/${bt.backtest_id}`)
                     }}
                   >
                     <TableCell onClick={(e) => e.stopPropagation()}>
@@ -261,6 +258,17 @@ export default function BacktestIndex() {
                             onClick={() => handleCancel(bt.backtest_id)}
                           >
                             <TrendingDown className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {(bt.status === 'completed' || bt.status === 'failed') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            title="Rerun"
+                            onClick={() => navigate(`/backtest/new?rerun=${bt.backtest_id}`)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
                         )}
                         {bt.status === 'completed' && (

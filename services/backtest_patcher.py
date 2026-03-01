@@ -109,6 +109,9 @@ class StrategyPatcher:
             while True:
                 ... strategy logic ...
                 time.sleep(N)
+
+        `continue` statements are replaced with `return` since they are
+        no longer inside a loop after extraction into a function.
         """
         lines = code.split("\n")
         result = []
@@ -134,7 +137,13 @@ class StrategyPatcher:
                     in_while_loop = False
                     result.append(line)
                 else:
-                    result.append(line)
+                    # Replace bare `continue`/`break` with `return` (no longer in a loop)
+                    if re.match(r"continue\s*$", stripped):
+                        result.append(line.replace("continue", "return"))
+                    elif re.match(r"break\s*$", stripped):
+                        result.append(line.replace("break", "return"))
+                    else:
+                        result.append(line)
 
         return "\n".join(result)
 

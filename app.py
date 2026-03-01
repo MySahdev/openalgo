@@ -195,6 +195,9 @@ def create_app():
     else:
         app.config["WTF_CSRF_TIME_LIMIT"] = None  # No time limit if empty
 
+    # Register backtest blueprint BEFORE React (to avoid /backtest/<id> catching /backtest/api/...)
+    app.register_blueprint(backtest_bp)  # Register Backtest blueprint
+
     # Register RESTx API blueprint first
     # Register React frontend blueprint FIRST for migrated routes
     # Register React frontend routes
@@ -255,7 +258,6 @@ def create_app():
     app.register_blueprint(flow_bp)  # Register Flow blueprint
     app.register_blueprint(broker_credentials_bp)  # Register Broker credentials blueprint
     app.register_blueprint(system_permissions_bp)  # Register System permissions blueprint
-    app.register_blueprint(backtest_bp)  # Register Backtest blueprint
 
     # Exempt webhook endpoints from CSRF protection after app initialization
     with app.app_context():
